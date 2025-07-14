@@ -1,0 +1,20 @@
+# Compiled object files
+*.o
+*.obj
+ 
+# Executables
+*.exe
+*.out
+*.app
+ 
+# Build directory
+build/
+ 
+# Dependency files
+*.d
+ 
+# Editor/IDE files
+.vscode/
+*.log
+*.swp
+.DS_Store
