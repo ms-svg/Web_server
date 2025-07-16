@@ -1,10 +1,10 @@
-// src/socket/TCPWebServer.cpp
 #include "../../include/socket/TCPWebServer.hpp"
 #include <iostream>
 #include <unistd.h>
 #include <cstring>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <curl/curl.h>
 
 TCPWebServer::TCPWebServer() : server_fd(-1) {}
 
@@ -38,6 +38,79 @@ bool TCPWebServer::start(int port) {
     return true;
 }
 
+std::string TCPWebServer::getHostFromRequest(const char* request) {
+    std::string req(request);
+    size_t host_pos = req.find("Host:");
+    if (host_pos == std::string::npos) return "";
+
+    size_t start = host_pos + 5; // length of "Host:"
+    size_t colon_pos = req.find(':', start);
+    size_t newline_pos = req.find("\r\n", start);
+    size_t end;
+    if (colon_pos != std::string::npos && colon_pos < newline_pos) {
+        end = colon_pos;
+    } else {
+        end = newline_pos;
+    }
+    std::string host = req.substr(start, end - start);
+    host.erase(0, host.find_first_not_of(" \t"));
+    host.erase(host.find_last_not_of(" \t") + 1);
+    return host;
+}
+
+// Callback for storing fetched data into buffer.
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t totalSize = size * nmemb;
+    std::string* response = static_cast<std::string*>(userp);
+    response->append(static_cast<char*>(contents), totalSize);
+    return totalSize;
+}
+
+// Fetching content for the given url.
+std::string TCPWebServer::fetch_webpage(const std::string& url) {
+    CURL* curl;
+    CURLcode res;
+    std::string readBuffer;
+
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+        // send request acting as a proxy.
+        res = curl_easy_perform(curl);
+
+        if (res != CURLE_OK) {
+            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+            readBuffer = "";
+        }
+
+        // Cleanup
+        curl_easy_cleanup(curl);
+    } else {
+        std::cerr << "Failed to init curl\n";
+    }
+
+    return readBuffer;
+}
+
+
+std::string TCPWebServer::getURLFromRequest(const char* request) {
+    std::string req(request);
+    size_t start = req.find("GET ");
+    if (start == std::string::npos) return "";
+
+    start += 4; 
+    size_t end = req.find(" HTTP/", start);
+    if (end == std::string::npos) return "";
+
+    return req.substr(start, end - start); 
+}
+
+
 void TCPWebServer::handleRequests() {
     struct sockaddr_in client_addr{};
     socklen_t addrlen = sizeof(client_addr);
@@ -51,16 +124,30 @@ void TCPWebServer::handleRequests() {
 
         char buffer[3000] = {0};
         read(client_fd, buffer, 3000);
-        std::cout << "📥 Request received:\n" << buffer << "\n";
 
-        std::string http_response =
+        std::cout << "📥 Request received:\n" << buffer << "\n";
+       
+        std::string host = getHostFromRequest(buffer);
+
+        if (host == "127.0.0.1" || host == "localhost" || host == "your_local_ip_here") {
+            std::string http_response =
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html\r\n"
             "Content-Length: 46\r\n"
             "\r\n"
             "<html><body><h1>Hello World</h1></body></html>";
-
-        send(client_fd, http_response.c_str(), http_response.length(), 0);
+            send(client_fd, http_response.c_str(), http_response.length(), 0);
+        } 
+        else {
+            std::string webpage = fetch_webpage("http://" + host);
+            std::string response = 
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html\r\n"
+                "Content-Length: " + std::to_string(webpage.size()) + "\r\n"
+                "\r\n" +
+                webpage;
+            send(client_fd, response.c_str(), response.length(), 0);
+        }
         close(client_fd);
     }
 }
