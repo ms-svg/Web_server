@@ -5,6 +5,11 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <curl/curl.h>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
+namespace fs = std::filesystem;
+
 
 TCPWebServer::TCPWebServer() : server_fd(-1) {}
 
@@ -111,6 +116,7 @@ std::string TCPWebServer::getURLFromRequest(const char* request) {
 }
 
 
+
 void TCPWebServer::handleRequests() {
     struct sockaddr_in client_addr{};
     socklen_t addrlen = sizeof(client_addr);
@@ -126,31 +132,46 @@ void TCPWebServer::handleRequests() {
         read(client_fd, buffer, 3000);
 
         std::cout << "📥 Request received:\n" << buffer << "\n";
-       
-        std::string host = getHostFromRequest(buffer);
 
-        if (host == "127.0.0.1" || host == "localhost" || host == "your_local_ip_here") {
-            std::string http_response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 46\r\n"
-            "\r\n"
-            "<html><body><h1>Hello World</h1></body></html>";
-            send(client_fd, http_response.c_str(), http_response.length(), 0);
-        } 
-        else {
-            std::string webpage = fetch_webpage("http://" + host);
-            std::string response = 
+        std::string path = getURLFromRequest(buffer); // e.g., /cat
+        if (!path.empty() && path[0] == '/') path = path.substr(1); // remove leading '/'
+
+        std::string local_file_path = "/home/ms2109/Project_1/disk/" + path + ".html";
+
+        std::cout<<local_file_path<<std::endl;
+
+        if (fs::exists(local_file_path)) {
+            std::ifstream file(local_file_path);
+            std::stringstream content;
+            content << file.rdbuf();
+            std::string body = content.str();
+
+            std::string response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html\r\n"
+                "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                "\r\n" + body;
+
+            send(client_fd, response.c_str(), response.length(), 0);
+        } else {
+            // Fallback: Google search
+            std::string search_url = "https://www.google.com/search?q=" + path;
+            std::cout<<search_url<<std::endl;
+            std::string webpage = fetch_webpage(search_url);
+            
+            std::string response =
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: text/html\r\n"
                 "Content-Length: " + std::to_string(webpage.size()) + "\r\n"
-                "\r\n" +
-                webpage;
+                "\r\n" + webpage;
+
             send(client_fd, response.c_str(), response.length(), 0);
         }
+
         close(client_fd);
     }
 }
+
 
 void TCPWebServer::stop() {
     close(server_fd);
