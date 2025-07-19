@@ -17,4 +17,5 @@ build/
 .vscode/
 *.log
 *.swp
-.DS_Store
+.DS_Storecode_arm64.deb
+packages.microsoft.gpg

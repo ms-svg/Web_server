@@ -1,9 +1,10 @@
 #pragma once
 #include <string>
+#include <filesystem>
 
 class TCPWebServer {
 public:
-    TCPWebServer();
+    TCPWebServer(const std::filesystem::path& base_path);
     bool start(int port);
     void handleRequests();
     void stop();
@@ -13,4 +14,5 @@ public:
     ~TCPWebServer();
 private:
     int server_fd;
+    std::filesystem::path base_path;
 };
