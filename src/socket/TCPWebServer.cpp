@@ -10,8 +10,13 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
-
-TCPWebServer::TCPWebServer() : server_fd(-1) {}
+TCPWebServer::TCPWebServer(const std::filesystem::path& basePath) 
+    : server_fd(-1), base_path(basePath) {
+    if (!fs::exists(basePath)) {
+        std::cerr << "Base path does not exist: " << basePath << "\n";
+        throw std::runtime_error("Invalid base path");
+    }
+}
 
 bool TCPWebServer::start(int port) {
     struct sockaddr_in address{};
@@ -134,10 +139,9 @@ void TCPWebServer::handleRequests() {
         std::cout << "📥 Request received:\n" << buffer << "\n";
 
         std::string path = getURLFromRequest(buffer); // e.g., /cat
-        if (!path.empty() && path[0] == '/') path = path.substr(1); // remove leading '/'
-
-        std::string local_file_path = "/home/ms2109/Project_1/disk/" + path + ".html";
-
+      //  if (!path.empty() && path[0] == '/') path = path.substr(1); // remove leading '/'
+        
+        std::string local_file_path = (base_path.string()+"/disk" + path + ".html");
         std::cout<<local_file_path<<std::endl;
 
         if (fs::exists(local_file_path)) {
