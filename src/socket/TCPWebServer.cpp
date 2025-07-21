@@ -141,7 +141,7 @@ void TCPWebServer::handleRequests() {
         std::string path = getURLFromRequest(buffer); // e.g., /cat
       //  if (!path.empty() && path[0] == '/') path = path.substr(1); // remove leading '/'
         
-        std::string local_file_path = (base_path.string()+"/disk" + path + ".html");
+        std::string local_file_path = (base_path.string()+"/disk/HTML" + path + ".html");
         std::cout<<local_file_path<<std::endl;
 
         if (fs::exists(local_file_path)) {
@@ -153,7 +153,7 @@ void TCPWebServer::handleRequests() {
             std::string response =
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: text/html\r\n"
-                "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                "Content-Length: " + std::to_string(body.size()) + "\r\n"   
                 "\r\n" + body;
 
             send(client_fd, response.c_str(), response.length(), 0);
