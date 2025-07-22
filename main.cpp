@@ -7,7 +7,9 @@ int main() {
 
     // 🔍 Build the index first
     FileIndexer indexer;
-    indexer.buildIndex((base_path / "disk").string());
+    indexer.buildIndex((base_path.string()+"/disk"));
+    std::cout << base_path << std::endl;
+    std::cout << "Index built successfully.\n";
 
     // TODO: You can use indexer.search("keyword") from some endpoint
 

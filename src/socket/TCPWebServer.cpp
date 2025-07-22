@@ -8,6 +8,9 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include "../../include/indexer/FileIndexer.hpp"  // Adjust path if needed
+#include <regex>
+
 namespace fs = std::filesystem;
 
 TCPWebServer::TCPWebServer(const std::filesystem::path& basePath) 
@@ -120,11 +123,36 @@ std::string TCPWebServer::getURLFromRequest(const char* request) {
     return req.substr(start, end - start); 
 }
 
+void TCPWebServer::googleFallback(const std::string& path, int client_fd) {
+                // If the request is not handled by our server, we can redirect to Google search.
+                // This is a fallback mechanism.
+                std::cout << "🔍 Redirecting to Google search for: " << path << "\n";
+
+                // Construct the Google search URL
+                // e.g. /search?q=test -> https://www.google.com/search?q=test
+                if (path.empty() || path == "/") {
+                    std::cout<<"Please provide valid query"<<std::endl; // Default search term if path is empty
+                    return;
+                } 
+
+                std::string search_url = "https://www.google.com/search?q=" + path;
+                std::string webpage = fetch_webpage(search_url);
+
+                std::string response =
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: " + std::to_string(webpage.size()) + "\r\n"
+                    "\r\n" + webpage;
+
+                send(client_fd, response.c_str(), response.length(), 0);
+}
 
 
 void TCPWebServer::handleRequests() {
     struct sockaddr_in client_addr{};
     socklen_t addrlen = sizeof(client_addr);
+
+    
 
     while (true) {
         int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
@@ -136,45 +164,59 @@ void TCPWebServer::handleRequests() {
         char buffer[3000] = {0};
         read(client_fd, buffer, 3000);
 
+
         std::cout << "📥 Request received:\n" << buffer << "\n";
 
-        std::string path = getURLFromRequest(buffer); // e.g., /cat
-      //  if (!path.empty() && path[0] == '/') path = path.substr(1); // remove leading '/'
+        std::string path = getURLFromRequest(buffer);  // e.g. /search?q=test or /cat
+
+        std::cout << path << std::endl;
+
+        FileIndexer indexer;
+        indexer.buildIndex(base_path.string() + "/disk");  // Only index files inside disk/
+
+        // extract query term
         
-        std::string local_file_path = (base_path.string()+"/disk/HTML" + path + ".html");
-        std::cout<<local_file_path<<std::endl;
+        if (path.rfind("/search?q=", 0) == 0 && path.size() > 10) {
+            std::string query = path.substr(10);
+            std::cout<<"🔍 Searching for: " << query << "\n";
+            std::vector<std::string> results = indexer.search(query);
 
-        if (fs::exists(local_file_path)) {
-            std::ifstream file(local_file_path);
-            std::stringstream content;
-            content << file.rdbuf();
-            std::string body = content.str();
+            std::cout << "Results size: " << results.size() << std::endl;
+            for (const auto& result : results) {
+                std::cout << result << std::endl;
+            }
 
-            std::string response =
+
+            if (!results.empty()) {
+               std::string html;
+                html += "<html><body><h3>Search Results:</h3><ul>";
+                for (const auto& result : results) {
+                    html += "<li><a href=\"/" + result + "\">" + result + "</a></li>";
+                }
+                html += "</ul></body></html>";
+                std::string response =
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: text/html\r\n"
-                "Content-Length: " + std::to_string(body.size()) + "\r\n"   
-                "\r\n" + body;
-
-            send(client_fd, response.c_str(), response.length(), 0);
-        } else {
-            // Fallback: Google search
-            std::string search_url = "https://www.google.com/search?q=" + path;
-            std::cout<<search_url<<std::endl;
-            std::string webpage = fetch_webpage(search_url);
-            
+                "Content-Length: " + std::to_string(html.size()) + "\r\n"
+                "\r\n" + html;
+                send(client_fd, response.c_str(), response.size(), 0);
+            } else {
+                // Redirect to Google search if no local result
+                googleFallback(query, client_fd);
+            }
+        }else{
             std::string response =
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html\r\n"
-                "Content-Length: " + std::to_string(webpage.size()) + "\r\n"
-                "\r\n" + webpage;
-
-            send(client_fd, response.c_str(), response.length(), 0);
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
         }
 
         close(client_fd);
+        std::cout << "📤 Response sent to client.\n";
     }
 }
+
 
 
 void TCPWebServer::stop() {
