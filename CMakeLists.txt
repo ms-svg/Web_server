@@ -14,6 +14,7 @@ add_subdirectory(src/indexer)
 add_executable(server
     main.cpp
     src/socket/TCPWebServer.cpp
+    src/Cache/LRUCache.cpp
     # Add other relevant .cpp files here
 )
 

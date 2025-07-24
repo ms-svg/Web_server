@@ -1,4 +1,5 @@
 #include "../../include/socket/TCPWebServer.hpp"
+#include "../../include/Cache/LRUCache.hpp"
 #include <iostream>
 #include <unistd.h>
 #include <cstring>
@@ -8,10 +9,11 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "../../include/indexer/FileIndexer.hpp"  // Adjust path if needed
+#include "../../include/indexer/FileIndexer.hpp"  
 #include <regex>
 
 namespace fs = std::filesystem;
+static LRUCache cache(5);
 
 TCPWebServer::TCPWebServer(const std::filesystem::path& basePath) 
     : server_fd(-1), base_path(basePath) {
@@ -123,16 +125,14 @@ std::string TCPWebServer::getURLFromRequest(const char* request) {
     return req.substr(start, end - start); 
 }
 
-void TCPWebServer::googleFallback(const std::string& path, int client_fd) {
-                // If the request is not handled by our server, we can redirect to Google search.
-                // This is a fallback mechanism.
+std::string TCPWebServer::googleFallback(const std::string& path, int client_fd) {
+                // This is a fallback mechanism incase the request response is not found in our disk and cache.
                 std::cout << "🔍 Redirecting to Google search for: " << path << "\n";
 
-                // Construct the Google search URL
-                // e.g. /search?q=test -> https://www.google.com/search?q=test
+                // Construct the Google search URL (As of now we redirecting our requests to google only.)
                 if (path.empty() || path == "/") {
-                    std::cout<<"Please provide valid query"<<std::endl; // Default search term if path is empty
-                    return;
+                    std::cout<<"Please provide valid query"<<std::endl;
+                    return "";
                 } 
 
                 std::string search_url = "https://www.google.com/search?q=" + path;
@@ -145,6 +145,9 @@ void TCPWebServer::googleFallback(const std::string& path, int client_fd) {
                     "\r\n" + webpage;
 
                 send(client_fd, response.c_str(), response.length(), 0);
+
+                // we need to return response to store in cache.
+                return webpage;
 }
 
 
@@ -167,16 +170,16 @@ void TCPWebServer::handleRequests() {
 
         std::cout << "📥 Request received:\n" << buffer << "\n";
 
-        std::string path = getURLFromRequest(buffer);  // e.g. /search?q=test or /cat
+        std::string path = getURLFromRequest(buffer); 
 
         std::cout << path << std::endl;
 
         FileIndexer indexer;
         indexer.buildIndex(base_path.string() + "/disk");  // Only index files inside disk/
 
-        // extract query term
-        
+        // extract query term 
         if (path.rfind("/search?q=", 0) == 0 && path.size() > 10) {
+            std::cout<<" sammmmm \n";
             std::string query = path.substr(10);
             std::cout<<"🔍 Searching for: " << query << "\n";
             std::vector<std::string> results = indexer.search(query);
@@ -201,17 +204,33 @@ void TCPWebServer::handleRequests() {
                 "\r\n" + html;
                 send(client_fd, response.c_str(), response.size(), 0);
             } else {
-                // Redirect to Google search if no local result
-                googleFallback(query, client_fd);
+                // Cache check
+                std::string cached = cache.get(query);
+
+                if (!cached.empty()) {
+                    std::cout << "Cache hit for: " << query << std::endl;
+                    std::string response =
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: " + std::to_string(cached.size()) + "\r\n"
+                    "\r\n" + cached;
+                    send(client_fd, response.c_str(), response.size(), 0);
+                } else {
+                    // fallback to Google if disk and cache both failed and store response in cache.
+                    std::string fetchedHtml = googleFallback(query, client_fd); 
+                    cache.put(query, fetchedHtml);
+                }
             }
         }else{
             std::string response =
             "HTTP/1.1 404 Not Found\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n";
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 9\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "Not Found";
             send(client_fd, response.c_str(), response.size(), 0);
         }
-
         close(client_fd);
         std::cout << "📤 Response sent to client.\n";
     }
