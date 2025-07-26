@@ -81,6 +81,25 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
+std::string TCPWebServer::urlDecode(const std::string& str) {
+    std::string result;
+    char ch;
+    int i, j;
+    for (i = 0; i < str.length(); i++) {
+        if (str[i] == '%') {
+            sscanf(str.substr(i + 1, 2).c_str(), "%x", &j);
+            ch = static_cast<char>(j);
+            result += ch;
+            i += 2;
+        } else if (str[i] == '+') {
+            result += ' ';
+        } else {
+            result += str[i];
+        }
+    }
+    return result;
+}
+
 // Fetching content for the given url.
 std::string TCPWebServer::fetch_webpage(const std::string& url) {
     CURL* curl;
@@ -88,6 +107,8 @@ std::string TCPWebServer::fetch_webpage(const std::string& url) {
     std::string readBuffer;
 
     curl = curl_easy_init();
+
+    std::cout << " Url is "<<url<<std::endl;
     if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -181,8 +202,9 @@ void TCPWebServer::handleRequests() {
         if (path.rfind("/search?q=", 0) == 0 && path.size() > 10) {
             std::cout<<" sammmmm \n";
             std::string query = path.substr(10);
-            std::cout<<"🔍 Searching for: " << query << "\n";
-            std::vector<std::string> results = indexer.search(query);
+            std::string diskquery = urlDecode(query);
+            std::cout<<"🔍 Searching for: " << diskquery << "\n";
+            std::vector<std::string> results = indexer.search(diskquery);
 
             std::cout << "Results size: " << results.size() << std::endl;
             for (const auto& result : results) {

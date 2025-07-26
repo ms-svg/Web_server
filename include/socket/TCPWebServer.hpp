@@ -11,6 +11,7 @@ public:
     std::string getHostFromRequest(const char *);
     std::string getURLFromRequest(const char *);
     std::string fetch_webpage(const std::string& url);
+    std::string urlDecode(const std::string& str);
     std::string googleFallback(const std::string& path, int client_fd);
     ~TCPWebServer();
 private:
