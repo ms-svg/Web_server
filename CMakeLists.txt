@@ -4,28 +4,27 @@ project(MyWebServer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find curl package
+# Find CURL package
 find_package(CURL REQUIRED)
 
-# Add indexer library first
-add_subdirectory(src/indexer)
+# Add subdirectory for Search module
+add_subdirectory(src/Search)
 
-# Define the executable and its source files
+# Define the executable and its sources
 add_executable(server
     main.cpp
-    src/socket/TCPWebServer.cpp
+    src/Server/TCPServer.cpp
+    src/Server/RequestHandler.cpp
     src/Cache/LRUCache.cpp
-    # Add other relevant .cpp files here
 )
 
 # Include directories
 target_include_directories(server PRIVATE
-    include
-    src/indexer
+    ${CMAKE_SOURCE_DIR}/include
 )
 
-# Link libraries
+# Link the correct libraries
 target_link_libraries(server PRIVATE
-    indexer
+    Sengine
     CURL::libcurl
 )

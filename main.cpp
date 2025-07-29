@@ -1,23 +1,24 @@
-#include "include/socket/TCPWebServer.hpp"
+#include "include/Server/TCPServer.hpp"
+#include <filesystem>
 #include "utils/ConfigLoader.hpp"
-#include "include/indexer/FileIndexer.hpp"
+#include "include/Search/FileIndexer.hpp"
+#include <iostream>
+
 
 int main() {
     std::filesystem::path base_path = ConfigLoader::loadBasePath();
+    if (base_path.empty()) {
+        std::cerr << "Base path is not set in the configuration.\n";
+        return 1;
+    }
 
-    // 🔍 Build the index first
+    // Build the index first
     FileIndexer indexer;
-    indexer.buildIndex((base_path.string()+"/disk"));
+    indexer.buildIndex(base_path.string() + "/disk");
     std::cout << base_path << std::endl;
     std::cout << "Index built successfully.\n";
 
-    // TODO: You can use indexer.search("keyword") from some endpoint
-
-    TCPWebServer server(base_path);
-    if (!server.start(8080)) {
-        return 1;
-    }
-    server.handleRequests();
-
+    TCPServer server(base_path, indexer);
+    server.start(8080);
     return 0;
 }
