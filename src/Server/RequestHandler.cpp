@@ -7,6 +7,7 @@
 #include <regex>
 #include <curl/curl.h>
 #include <unistd.h>
+#include <ctime>
 #include "Cache/LRUCache.hpp"
 
 LRUCache* cache_ = new LRUCache(5); 
@@ -164,6 +165,149 @@ void RequestHandler::getRequestHandler(int client_fd, FileIndexer& indexer, std:
     std::cout << "Response sent to client.\n";
 }
 
+void RequestHandler::postRequestHandler(int clientSocket, const std::string& request) {
+    std::cout << "Handling POST request.\n";
+
+    // Find boundary from Content-Type
+    std::string boundaryPrefix = "boundary=";
+    size_t boundaryPos = request.find(boundaryPrefix);
+    if (boundaryPos == std::string::npos) {
+        std::cerr << "Boundary not found.\n";
+        return;
+    }
+
+    // Extract boundary value (remove any trailing characters like \r\n)
+    std::string boundaryValue = request.substr(boundaryPos + boundaryPrefix.length());
+    size_t boundaryEnd = boundaryValue.find_first_of("\r\n");
+    if (boundaryEnd != std::string::npos) {
+        boundaryValue = boundaryValue.substr(0, boundaryEnd);
+    }
+    std::string boundary = "--" + boundaryValue;
+    std::cout << "🔍 Boundary: [" << boundary << "]\n";
+    
+    size_t endOfHeaders = request.find("\r\n\r\n");
+    if (endOfHeaders == std::string::npos) {
+        std::cerr << "End of headers not found.\n";
+        return;
+    }
+
+    std::string body = request.substr(endOfHeaders + 4);
+    std::cout << "Body content:\n[" << body << "]\n";
+    std::cout << "Body length: " << body.length() << "\n";
+    
+    // Check if this is a file upload with filename
+    size_t fileStart = body.find("filename=");
+    std::string filename;
+    std::string fileContent;
+    std::string folder;
+    
+    if (fileStart != std::string::npos) {
+        // Handle file upload with filename
+        std::cout << "Processing file upload with filename.\n";
+        
+        // Extract filename
+        size_t startQuote = body.find("\"", fileStart);
+        size_t endQuote = body.find("\"", startQuote + 1);
+        filename = body.substr(startQuote + 1, endQuote - startQuote - 1);
+
+        // Locate the beginning of the file data
+        size_t contentStart = body.find("\r\n\r\n", endQuote);
+        if (contentStart == std::string::npos) {
+            std::cerr << "File content start not found.\n";
+            return;
+        }
+        contentStart += 4;
+
+        size_t contentEnd = body.find("\r\n" + boundary, contentStart);
+        if (contentEnd == std::string::npos) {
+            contentEnd = body.find(boundary, contentStart);
+        }
+        if (contentEnd != std::string::npos) {
+            fileContent = body.substr(contentStart, contentEnd - contentStart);
+            // Remove any trailing \r\n
+            while (!fileContent.empty() && (fileContent.back() == '\r' || fileContent.back() == '\n')) {
+                fileContent.pop_back();
+            }
+        } else {
+            fileContent = body.substr(contentStart);
+        }
+
+        // Decide folder based on extension
+        if (filename.find(".txt") != std::string::npos)
+            folder = "disk/TEXT/";
+        else if (filename.find(".html") != std::string::npos)
+            folder = "disk/HTML/";
+        else {
+            std::cerr << "Unsupported file type: " << filename << "\n";
+            return;
+        }
+    } else {
+        // Handle simple POST data without filename
+        std::cout << "Processing POST data without filename.\n";
+        
+        // Look for form field name (e.g., name="data" or name="content")
+        size_t nameStart = body.find("name=\"");
+        if (nameStart != std::string::npos) {
+            size_t nameEndQuote = body.find("\"", nameStart + 6);
+            std::string fieldName = body.substr(nameStart + 6, nameEndQuote - nameStart - 6);
+            std::cout << "Found field: " << fieldName << "\n";
+            
+            // Get content after the headers
+            size_t contentStart = body.find("\r\n\r\n", nameEndQuote);
+            if (contentStart != std::string::npos) {
+                contentStart += 4;
+                size_t contentEnd = body.find("\r\n" + boundary, contentStart);
+                if (contentEnd == std::string::npos) {
+                    contentEnd = body.find(boundary, contentStart);
+                }
+                if (contentEnd != std::string::npos) {
+                    fileContent = body.substr(contentStart, contentEnd - contentStart);
+                    // Remove any trailing \r\n
+                    while (!fileContent.empty() && (fileContent.back() == '\r' || fileContent.back() == '\n')) {
+                        fileContent.pop_back();
+                    }
+                } else {
+                    fileContent = body.substr(contentStart);
+                }
+                
+                // Generate a default filename based on content type or field name
+                filename = fieldName + "_" + std::to_string(time(nullptr)) + ".txt";
+                folder = "disk/TEXT/";
+            }
+        } else {
+            // Fallback: treat entire body as text content
+            std::cout << "No form field found, treating as raw text.\n";
+            fileContent = body;
+            filename = "upload_" + std::to_string(time(nullptr)) + ".txt";
+            folder = "disk/TEXT/";
+        }
+    }
+
+    if (filename.empty() || fileContent.empty()) {
+        std::cerr << "Failed to extract filename or content.\n";
+        std::string response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid upload data\n";
+        send(clientSocket, response.c_str(), response.size(), 0);
+        return;
+    }
+
+    std::string fullPath = folder + filename;
+    std::ofstream outFile(fullPath);
+    if (!outFile) {
+        std::cerr << "Failed to open file for writing: " << fullPath << "\n";
+        std::string response = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nFailed to save file\n";
+        send(clientSocket, response.c_str(), response.size(), 0);
+        return;
+    }
+
+    outFile << fileContent;
+    outFile.close();
+
+    std::cout << "File saved: " << fullPath << "\n";
+    std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nFile uploaded to " + folder + " as " + filename + "\n";
+    send(clientSocket, response.c_str(), response.size(), 0);
+}
+
+
 void RequestHandler::handleClientRequest(int client_fd, const std::string& rawRequest,
                                          FileIndexer& indexer) {
     std::cout << "Request received:\n" << rawRequest << "\n";
@@ -189,17 +333,11 @@ void RequestHandler::handleClientRequest(int client_fd, const std::string& rawRe
         std::cout << "Parsed path: " << path << std::endl;
         getRequestHandler(client_fd, indexer, path);
     }
-    else if (method == "POST") {
-        std::cout << "POST request received, but not implemented yet.\n";
-        std::string response =
-            "HTTP/1.1 501 Not Implemented\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 16\r\n"
-            "\r\n"
-            "Not Implemented";
-        send(client_fd, response.c_str(), response.size(), 0);
-        close(client_fd);
-    } else {
+        else if (method == "POST") {
+            std::cout << "Handling POST request.\n";
+            postRequestHandler(client_fd, rawRequest);
+            close(client_fd);
+        } else {
         std::cout << "Unsupported request method: " << method << "\n";
         std::string response =
             "HTTP/1.1 400 Bad Request\r\n"
@@ -210,3 +348,4 @@ void RequestHandler::handleClientRequest(int client_fd, const std::string& rawRe
         send(client_fd, response.c_str(), response.size(), 0);
         close(client_fd);
     }
+}
