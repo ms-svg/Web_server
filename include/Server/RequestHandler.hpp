@@ -9,6 +9,7 @@ class RequestHandler {
 public:
     RequestHandler(const std::filesystem::path& basePath);
     void getRequestHandler(int client_fd, FileIndexer& indexer, std::string& path);
+    void postRequestHandler(int clientSocket, const std::string& request);
     void handleClientRequest(int client_fd, const std::string& rawRequest,
                              FileIndexer& indexer);
 
