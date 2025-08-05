@@ -48,14 +48,50 @@ void TCPServer::start(int port_) {
             continue;
         }
 
-        char buffer[4096] = {0};
-        ssize_t bytes_read = read(client_socket, buffer, sizeof(buffer));
+        const size_t CHUNK_SIZE = 16384; // 16KB per read
+        std::string request;
+        ssize_t bytes_read;
+        long expected_content_length = -1;
+        size_t header_end = std::string::npos;
+        bool headers_parsed = false;
 
-        if (bytes_read > 0) {
-            std::string request(buffer, bytes_read);
-            std::cout << "📥 Request received:\n" << request << "\n";
-            RequestHandler requestHandler(base_path); // Create RequestHandler with base path
+        while (true) {
+            char buffer[CHUNK_SIZE];
+            bytes_read = read(client_socket, buffer, CHUNK_SIZE);
+            if (bytes_read <= 0) break;
+            request.append(buffer, bytes_read);
+
+            if (!headers_parsed) {
+                header_end = request.find("\r\n\r\n");
+                if (header_end != std::string::npos) {
+                    size_t content_length_pos = request.find("Content-Length: ");
+                    if (content_length_pos != std::string::npos) {
+                        size_t length_start = content_length_pos + 16;
+                        size_t length_end = request.find("\r\n", length_start);
+                        std::string length_str = request.substr(length_start, length_end - length_start);
+                        expected_content_length = std::stol(length_str);
+                        std::cout << "Expected Content-Length: " << expected_content_length << " bytes\n";
+                    }
+                    headers_parsed = true;
+                }
+            }
+
+            if (headers_parsed && expected_content_length != -1) {
+                size_t headers_size = header_end + 4;
+                size_t body_size = request.size() - headers_size;
+                std::cout << "Body received so far: " << body_size << " bytes\n";
+                if (body_size >= (size_t)expected_content_length) {
+                    break;
+                }
+            }
+        }
+
+        if (!request.empty()) {
+            std::cout << "Total request size: " << request.size() << " bytes\n";
+            RequestHandler requestHandler(base_path);
             requestHandler.handleClientRequest(client_socket, request, indexer);
+        } else {
+            std::cout << "No data received from client\n";
         }
 
         close(client_socket);
